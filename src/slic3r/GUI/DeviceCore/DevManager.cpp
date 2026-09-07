@@ -1,6 +1,9 @@
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
 #include <exception>
+
+#include <boost/nowide/fstream.hpp>
 
 #include "DevManager.h"
 #include "DevUtil.h"
@@ -45,6 +48,44 @@ namespace {
 
 namespace Slic3r
 {
+    // Backlog experiment (backlogs/remote-bambu-printer-management.md): if a custom
+    // farm-machines file exists, provision those printers for this session the same way a
+    // manual LAN add would - which also restores an access code the stock flow may have
+    // wiped after a mis-classified connect failure. Purely additive: no file, no effect;
+    // any error is swallowed so startup is never disturbed. Path override:
+    // ORCA_FARM_MACHINES environment variable (default: <data_dir>/farm_machines.json).
+    static void load_farm_machines_hook(DeviceManager* dm)
+    {
+        try {
+            std::string path = data_dir() + "/farm_machines.json";
+            if (const char* env_path = std::getenv("ORCA_FARM_MACHINES"); env_path && *env_path)
+                path = env_path;
+
+            boost::nowide::ifstream file(path);
+            if (!file.good())
+                return;
+
+            json inventory = json::parse(file, nullptr, false);
+            if (inventory.is_discarded() || !inventory.contains("machines"))
+                return;
+
+            for (const auto& m : inventory["machines"]) {
+                BBLocalMachine machine;
+                machine.dev_id           = m.value("serial_number", "");
+                machine.dev_name         = m.value("name", machine.dev_id);
+                machine.dev_ip           = m.value("ip", "");
+                machine.printer_type     = m.value("model_id", "");
+                std::string access_code  = m.value("access_code", "");
+                if (machine.dev_id.empty() || machine.dev_ip.empty() || access_code.empty())
+                    continue;
+                dm->insert_local_device(machine, "farm", "free", m.value("version", ""), access_code);
+                BOOST_LOG_TRIVIAL(info) << "farm hook: provisioned dev_id=" << machine.dev_id;
+            }
+        } catch (...) {
+            // Experiment hook: fail silently.
+        }
+    }
+
     DeviceManager::DeviceManager(NetworkAgent* agent)
     {
         m_agent = agent;
@@ -56,6 +97,7 @@ namespace Slic3r
         // deferred to set_agent()).
         if (agent) {
             load_local_machines_from_config();
+            load_farm_machines_hook(this);
         }
     }
 
@@ -159,6 +201,7 @@ namespace Slic3r
 
         if (first_real_agent) {
             load_local_machines_from_config();
+            load_farm_machines_hook(this);
         }
     }
 
