@@ -6,6 +6,9 @@
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/format.hpp"
+#include "slic3r/Utils/Http.hpp"
+
+#include <cstdlib>
 
 namespace Slic3r {
 namespace GUI {
@@ -96,6 +99,75 @@ inline std::string get_transform_string(int bytes)
 	else
 		::sprintf(buffer, "%.1fK", ks);
 	return buffer;
+}
+
+// Backlog experiment (backlogs/remote-bambu-printer-management.md): the send-to-printer
+// upload is diverted to a local HTTP queue service instead of the printer's storage.
+// The endpoint can be overridden with the ORCA_QUEUE_URL environment variable.
+static std::string queue_endpoint_url()
+{
+    if (const char *url = std::getenv("ORCA_QUEUE_URL"); url && *url)
+        return url;
+    return "http://127.0.0.1:5001/api/v1/job";
+}
+
+static int send_to_http_queue(const PrintParams &params,
+                              std::function<void(int, int, std::string)> update_fn,
+                              std::function<bool()>                      cancel_fn)
+{
+    boost::system::error_code ec;
+    boost::filesystem::path   file_path(params.filename);
+    if (!boost::filesystem::exists(file_path, ec))
+        return BAMBU_NETWORK_ERR_PRINT_SP_FILE_NOT_EXIST;
+
+    // Inventory identity, artifact and print options only; dev_ip/username/password
+    // (access code) are deliberately not part of the queue request.
+    json submission;
+    submission["schema_version"]   = 2;
+    submission["operation"]        = "start_local_print";
+    submission["dev_id"]           = params.dev_id;
+    submission["dev_name"]         = params.dev_name;
+    submission["project_name"]     = params.project_name;
+    submission["preset_name"]      = params.preset_name;
+    submission["plate_index"]      = params.plate_index;
+    submission["ams_mapping"]      = params.ams_mapping;
+    submission["ams_mapping2"]     = params.ams_mapping2;
+    submission["ams_mapping_info"] = params.ams_mapping_info;
+    submission["nozzles_info"]     = params.nozzles_info;
+    submission["connection_type"]  = params.connection_type;
+    submission["task_use_ams"]     = params.task_use_ams;
+    submission["size_bytes"]       = (uint64_t) boost::filesystem::file_size(file_path, ec);
+
+    if (update_fn)
+        update_fn(SendingPrintJobStage::PrintingStageCreate, 0, "");
+
+    int  result = BAMBU_NETWORK_ERR_FTP_UPLOAD_FAILED;
+    auto http   = Http::post(queue_endpoint_url());
+    http.timeout_connect(10)
+        .form_add("submission", submission.dump())
+        .form_add_file("sliced_file", file_path, params.project_name)
+        .on_progress([&update_fn, &cancel_fn](Http::Progress progress, bool &cancel) {
+            if (cancel_fn && cancel_fn()) {
+                cancel = true;
+                return;
+            }
+            if (update_fn && progress.ultotal > 0) {
+                int percent = (int) (progress.ulnow * 100 / progress.ultotal);
+                update_fn(SendingPrintJobStage::PrintingStageUpload, percent,
+                          get_transform_string((int) progress.ulnow) + "/" + get_transform_string((int) progress.ultotal));
+            }
+        })
+        .on_complete([&result](std::string body, unsigned status) {
+            BOOST_LOG_TRIVIAL(info) << "send_job: queue accepted the job, status=" << status << ", body=" << body;
+            result = 0;
+        })
+        .on_error([&result, &cancel_fn](std::string body, std::string error, unsigned status) {
+            BOOST_LOG_TRIVIAL(error) << "send_job: queue upload failed, status=" << status << ", error=" << error << ", body=" << body;
+            result = (cancel_fn && cancel_fn()) ? BAMBU_NETWORK_ERR_CANCELED : BAMBU_NETWORK_ERR_FTP_UPLOAD_FAILED;
+        })
+        .perform_sync();
+
+    return result;
 }
 
 void SendJob::process(Ctl &ctl)
@@ -309,7 +381,7 @@ void SendJob::process(Ctl &ctl)
             // try to send local with record
             BOOST_LOG_TRIVIAL(info) << "send_job: try to send gcode to printer";
             ctl.update_status(curr_percent, _u8L("Sending G-code file over LAN"));
-            result = agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);
+            result = send_to_http_queue(params, update_fn, cancel_fn);
             if (result == BAMBU_NETWORK_ERR_FTP_UPLOAD_FAILED) {
                 params.comments = "upload_failed";
             } else {
@@ -333,7 +405,7 @@ void SendJob::process(Ctl &ctl)
                     if(this->has_sdcard) {
                         // means the sdcard is abnormal but can be used option is enabled
                          ctl.update_status(curr_percent, _u8L("Sending G-code file over LAN, but the Storage in the printer is abnormal and print-issues may be caused by this."));
-                         result = agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);
+                         result = send_to_http_queue(params, update_fn, cancel_fn);
                         break;
                     }
                     ctl.update_status(curr_percent, _u8L("The Storage in the printer is abnormal. Please replace it with a normal Storage before sending to printer."));
@@ -343,7 +415,7 @@ void SendJob::process(Ctl &ctl)
                     return;
                 case DevStorage::SdcardState::HAS_SDCARD_NORMAL:
                     ctl.update_status(curr_percent, _u8L("Sending G-code file over LAN"));
-                    result = agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);       
+                    result = send_to_http_queue(params, update_fn, cancel_fn);
                     break;
                 default:
                     ctl.update_status(curr_percent, _u8L("Encountered an unknown error with the Storage status. Please try again."));
