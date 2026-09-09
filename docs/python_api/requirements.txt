@@ -1,0 +1,4 @@
+# Documentation build for docs/python_api.
+#   python3 -m venv .venv-docs && .venv-docs/bin/pip install -r docs/python_api/requirements.txt
+sphinx>=7.2
+furo>=2024.1.29

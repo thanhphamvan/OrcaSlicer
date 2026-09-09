@@ -1,0 +1,31 @@
+/* Reference pages are dense with signatures and type fields; give them room
+   and make the structure scannable. */
+
+.rst-content dl.py > dt,
+dl.py > dt {
+    font-size: 0.95rem;
+}
+
+/* Attribute/method names carry the meaning - keep them ahead of their types. */
+dl.py .sig-name {
+    font-weight: 700;
+}
+
+/* ":type:" fields read as metadata, not prose. */
+dl.field-list > dt {
+    opacity: 0.75;
+    font-size: 0.85rem;
+    text-transform: lowercase;
+}
+
+/* Tables in the narrative pages should wrap rather than scroll. */
+table.docutils td,
+table.docutils th {
+    white-space: normal;
+    vertical-align: top;
+}
+
+/* Long module titles in the sidebar. */
+.sidebar-tree .reference {
+    overflow-wrap: anywhere;
+}

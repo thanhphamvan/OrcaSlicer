@@ -54,3 +54,9 @@ __pycache__/
 *.pyc
 *.opc
 /.test/
+
+# Python API documentation (docs/python_api)
+/.venv-docs/
+/.venv-stubgen/
+docs/python_api/generated/
+docs/python_api/_build/
