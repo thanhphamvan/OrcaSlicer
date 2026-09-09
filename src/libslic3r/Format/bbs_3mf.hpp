@@ -81,8 +81,16 @@ struct PlateData
     void parse_filament_info(GCodeProcessorResult *result);
 
     int plate_index;
+    // Filled by PartPlateList when saving, and by the 3mf importer from imported_obj_inst_list
+    // below, as (model object index, model instance index) pairs.
     std::vector<std::pair<int, int>> objects_and_instances;
+    // Keyed by 3mf object resource id, so several copies of one object on the same plate
+    // collapse into a single entry. Kept for the identify_id lookup it has always served.
     std::map<int, std::pair<int, int>> obj_inst_map;
+    // Every <model_instance> of this plate as read from the archive, as
+    // (3mf object resource id, instance index). Unlike obj_inst_map this preserves each copy,
+    // so a consumer can resolve complete plate membership instead of one instance per object.
+    std::vector<std::pair<int, int>> imported_obj_inst_list;
     std::string     printer_model_id;
     std::string     nozzle_diameters;
     std::string     nozzle_volume_types;

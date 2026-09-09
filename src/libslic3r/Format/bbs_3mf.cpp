@@ -2328,6 +2328,7 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
             plate_data_list[it->first-1]->plate_index = it->second->plate_index-1;
             plate_data_list[it->first-1]->plate_name = it->second->plate_name;
             plate_data_list[it->first-1]->obj_inst_map = it->second->obj_inst_map;
+            plate_data_list[it->first-1]->imported_obj_inst_list = it->second->imported_obj_inst_list;
             plate_data_list[it->first-1]->gcode_file = (m_load_restore || it->second->gcode_file.empty()) ? it->second->gcode_file : m_backup_path + "/" + it->second->gcode_file;
             plate_data_list[it->first-1]->gcode_prediction = it->second->gcode_prediction;
             plate_data_list[it->first-1]->gcode_weight = it->second->gcode_weight;
@@ -2393,6 +2394,33 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                 ModelInstance* inst =  obj->instances[inst_index];
                 inst->loaded_id = map_it->second.second;
                 map_it++;
+            }
+
+            // Resolve the imported <model_instance> elements to model indices, so consumers
+            // reading a project get the plate's complete membership without repeating the
+            // resource-id lookup. Unresolvable references are dropped with a warning, exactly
+            // as the identify_id loop above does.
+            current_plate_data->objects_and_instances.clear();
+            for (const std::pair<int, int>& imported : current_plate_data->imported_obj_inst_list) {
+                IndexToPathMap::iterator index_iter = m_index_paths.find(imported.first);
+                if (index_iter == m_index_paths.end()) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ":" << __LINE__
+                        << boost::format(", can not resolve plate membership for object id=%1%, skip it")%imported.first;
+                    continue;
+                }
+                IdToModelObjectMap::iterator object_item = m_objects.find(std::make_pair(index_iter->second, index_iter->first));
+                if (object_item == m_objects.end() || object_item->second >= int(m_model->objects.size())) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ":" << __LINE__
+                        << boost::format(", can not resolve plate membership for object id=%1%, skip it")%imported.first;
+                    continue;
+                }
+                const int obj_index = object_item->second;
+                if (imported.second < 0 || imported.second >= int(m_model->objects[obj_index]->instances.size())) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ":" << __LINE__
+                        << boost::format(", invalid plate membership instance index %1% for object id=%2%, skip it")%imported.second %imported.first;
+                    continue;
+                }
+                current_plate_data->objects_and_instances.emplace_back(obj_index, imported.second);
             }
         }
 
@@ -4830,6 +4858,9 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
         }
 
         m_curr_plater->obj_inst_map.emplace(m_curr_instance.object_id, std::make_pair(m_curr_instance.instance_id, m_curr_instance.identify_id));
+        // obj_inst_map keeps only the first copy of an object; record every element so plate
+        // membership stays complete for objects placed on one plate more than once.
+        m_curr_plater->imported_obj_inst_list.emplace_back(m_curr_instance.object_id, m_curr_instance.instance_id);
         m_curr_instance.object_id = m_curr_instance.instance_id = -1;
         m_curr_instance.identify_id = 0;
         return true;
