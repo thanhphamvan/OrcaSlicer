@@ -55,7 +55,8 @@ static const float GRABBER_Y_FACTOR = 0.03f;
 static const float GRABBER_Z_VALUE = 0.5f;
 static unsigned int GLOBAL_PLATE_INDEX = 0;
 
-static const double LOGICAL_PART_PLATE_GAP = 1. / 5.;
+// LOGICAL_PART_PLATE_GAP, compute_colum_count and the grid origin rule live in PlateGrid.hpp,
+// shared with the headless project reader.
 static const int PARTPLATE_ICON_SIZE = 16;
 static const int PARTPLATE_EDIT_PLATE_NAME_ICON_SIZE = 9; // ORCA this also scales height of plate name
 static const int PARTPLATE_ICON_GAP_TOP = 3;
@@ -4162,17 +4163,7 @@ Vec3d PartPlateList::compute_origin(int i, int cols)
 //compute the origin for printable plate with index i using new width
 Vec3d PartPlateList::compute_origin_using_new_size(int i, int new_width, int new_depth)
 {
-	Vec3d origin;
-	int row, col;
-
-	row = i / m_plate_cols;
-	col = i % m_plate_cols;
-
-	origin(0) = col * (new_width * (1. + LOGICAL_PART_PLATE_GAP));
-	origin(1) = -row * (new_depth * (1. + LOGICAL_PART_PLATE_GAP));
-	origin(2) = 0;
-
-	return origin;
+	return compute_plate_origin(i, m_plate_cols, new_width, new_depth);
 }
 
 
@@ -4189,16 +4180,7 @@ Vec3d PartPlateList::compute_origin_for_unprintable()
 //compute shape position
 Vec2d PartPlateList::compute_shape_position(int index, int cols)
 {
-	Vec2d pos;
-	int row, col;
-
-	row = index / cols;
-	col = index % cols;
-
-	pos(0) = col * plate_stride_x();
-	pos(1) = -row * plate_stride_y();
-
-	return pos;
+	return to_2d(compute_plate_origin(index, cols, m_plate_width, m_plate_depth));
 }
 
 //generate icon textures
@@ -5098,18 +5080,12 @@ bool PartPlateList::contains(const BoundingBoxf3& bb)
 
 double PartPlateList::plate_stride_x()
 {
-	//const auto plate_shape = Slic3r::Polygon::new_scale(m_shape);
-	//double plate_width = plate_shape.bounding_box().size().x();
-	//return unscaled<double>((1. + LOGICAL_PART_PLATE_GAP) * plate_width);
-	return m_plate_width * (1. + LOGICAL_PART_PLATE_GAP);
+	return Slic3r::plate_stride_x(m_plate_width);
 }
 
 double PartPlateList::plate_stride_y()
 {
-	//const auto plate_shape = Slic3r::Polygon::new_scale(m_shape);
-	//double plate_depth = plate_shape.bounding_box().size().y();
-	//return unscaled<double>((1. + LOGICAL_PART_PLATE_GAP) * plate_depth);
-	return m_plate_depth * (1. + LOGICAL_PART_PLATE_GAP);
+	return Slic3r::plate_stride_y(m_plate_depth);
 }
 
 //get the plate counts, not including the invalid plate

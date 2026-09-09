@@ -1,4 +1,5 @@
 #include "PluginHost.hpp"
+#include "PluginHostApi.hpp"
 #include "PluginHostBindings.hpp"
 #include "PluginHostUi.hpp"
 #include <slic3r/plugin/PluginAuditManager.hpp>
@@ -30,6 +31,10 @@ void PluginHost::RegisterBindings(pybind11::module_& module)
 {
     auto host = module.def_submodule("host", "Host application API");
 
+    // Errors first: later registrars raise these types and re-export their names.
+    host_api::register_errors(host);
+    host_api::register_discovery(host);
+
     // Value types first so the docstring signatures of later registrars
     // resolve to the bound Python names.
     host_bindings::register_geometry(host);
@@ -44,6 +49,9 @@ void PluginHost::RegisterBindings(pybind11::module_& module)
 
     // Slicing print-graph data model (Print, Layer, Surface, ...).
     host_bindings::register_slicing(host);
+
+    // Owned project snapshots. Registers the project.read capability.
+    host_bindings::register_project(host);
 }
 
 } // namespace Slic3r

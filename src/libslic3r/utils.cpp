@@ -56,6 +56,7 @@
 #include <boost/log/trivial.hpp>
 #include <boost/log/expressions.hpp>
 #include <boost/log/sinks/async_frontend.hpp>
+#include <boost/log/sinks/sync_frontend.hpp>
 #include <boost/log/sinks/text_file_backend.hpp>
 #include <boost/log/sinks/text_ostream_backend.hpp>
 #include <boost/log/utility/setup/file.hpp>
@@ -366,6 +367,24 @@ namespace expr = boost::log::expressions;
 namespace keywords = boost::log::keywords;
 namespace attrs = boost::log::attributes;
 namespace sinks = boost::log::sinks;
+
+void set_console_logging_to_stderr()
+{
+	// Boost.Log writes to stdout until a sink is registered. Registering one on
+	// stderr both moves the diagnostics and suppresses that default, which is what
+	// keeps a user script's stdout free of native log lines.
+	auto backend = boost::make_shared<sinks::text_ostream_backend>();
+	backend->add_stream(boost::shared_ptr<std::ostream>(&std::cerr, boost::null_deleter()));
+	backend->auto_flush(true);
+
+	auto sink = boost::make_shared<sinks::synchronous_sink<sinks::text_ostream_backend>>(backend);
+	sink->set_formatter(expr::stream
+		<< "[" << expr::attr<logging::trivial::severity_level>("Severity") << "]\t"
+		<< expr::format_date_time<boost::posix_time::ptime>("TimeStamp", "%Y-%m-%d %H:%M:%S.%f")
+		<< ": " << expr::smessage);
+	boost::log::core::get()->add_sink(sink);
+	logging::add_common_attributes();
+}
 
 void shutdown_console_logging()
 {

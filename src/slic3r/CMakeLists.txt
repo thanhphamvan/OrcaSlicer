@@ -411,6 +411,7 @@ set(SLIC3R_GUI_SOURCES
     GUI/ParamsPanel.hpp
     GUI/PartPlate.cpp
     GUI/PartPlate.hpp
+    GUI/PlateGrid.hpp
     GUI/FilamentGroupPopup.hpp
     GUI/FilamentGroupPopup.cpp
     GUI/PhysicalPrinterDialog.cpp
@@ -620,12 +621,16 @@ set(SLIC3R_GUI_SOURCES
     plugin/PythonInterpreter.cpp
     plugin/PythonInterpreter.hpp
     plugin/PythonPluginBridge.cpp
+    plugin/PythonScriptRunner.cpp
+    plugin/PythonScriptRunner.hpp
     plugin/PythonPluginBridge.hpp
     plugin/PythonPluginInterface.hpp
     plugin/PyPluginPackage.hpp
     plugin/PluginBindingUtils.hpp
     plugin/host/PluginHost.cpp
     plugin/host/PluginHost.hpp
+    plugin/host/PluginHostApi.cpp
+    plugin/host/PluginHostApi.hpp
     plugin/host/PluginHostBindings.hpp
     plugin/host/PluginHostApp.cpp
     plugin/host/PluginHostGeometry.cpp
@@ -633,6 +638,9 @@ set(SLIC3R_GUI_SOURCES
     plugin/host/PluginHostMesh.hpp
     plugin/host/PluginHostModel.cpp
     plugin/host/PluginHostPresets.cpp
+    plugin/host/PluginHostProject.cpp
+    plugin/host/PluginHostProject.hpp
+    plugin/host/PluginHostProjectBindings.cpp
     plugin/host/PluginHostSlicing.cpp
     plugin/host/PluginHostUi.cpp
     plugin/host/PluginHostUi.hpp

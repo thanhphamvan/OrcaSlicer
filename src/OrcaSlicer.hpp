@@ -117,6 +117,17 @@ private:
 
     bool setup(int argc, char **argv);
 
+    /// Locate the resources/var/i18n/data directories. Shared by the normal CLI
+    /// setup and by script mode, which parses its own command line.
+    void setup_directories();
+
+    /// Handle `--script`: run one Python script and exit. Returns false when the
+    /// command line is not script mode, leaving the existing CLI untouched.
+    bool run_script_mode(int argc, char **argv, int &exit_code);
+
+    /// Prints the options script mode accepts.
+    void print_script_help() const;
+
     /// Prints usage of the CLI.
     void print_help(bool include_print_options = false, PrinterTechnology printer_technology = ptAny) const;
 

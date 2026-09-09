@@ -82,6 +82,9 @@ namespace Slic3r {
 
 extern void set_logging_level(unsigned int level);
 extern void set_logging_file(const std::string &file);
+// Send console logging to stderr instead of Boost.Log's default stdout sink.
+// Used where stdout belongs to something else, such as a user script's output.
+extern void set_console_logging_to_stderr();
 extern unsigned int level_string_to_boost(std::string level);
 extern std::string  get_string_logging_level(unsigned level);
 extern unsigned get_logging_level();

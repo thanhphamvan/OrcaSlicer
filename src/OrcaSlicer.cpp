@@ -82,6 +82,7 @@ using namespace nlohmann;
 #ifdef WIN32
 #include "dev-utils/BaseException.h"
 #endif
+#include "slic3r/plugin/PythonScriptRunner.hpp"
 #include "slic3r/GUI/PartPlate.hpp"
 #include "slic3r/GUI/BitmapCache.hpp"
 #include "slic3r/GUI/OpenGLManager.hpp"
@@ -1312,6 +1313,15 @@ int CLI::run(int argc, char **argv)
     #endif
         boost::nowide::cerr << text.c_str() << std::endl;
         return CLI_ENVIRONMENT_ERROR;
+    }
+
+    // Script mode is a separate process mode with its own option set and exit
+    // codes. It is detected before the ordinary CLI parse so `--script`/`--file`
+    // never reach it, and so a command line without --script keeps its behaviour.
+    {
+        int script_exit_code = 0;
+        if (this->run_script_mode(argc, argv, script_exit_code))
+            return script_exit_code;
     }
 
     if (!this->setup(argc, argv))
@@ -7263,7 +7273,7 @@ int CLI::run(int argc, char **argv)
     return 0;
 }
 
-bool CLI::setup(int argc, char **argv)
+void CLI::setup_directories()
 {
     // Detect the operating system flavor after SLIC3R_LOGLEVEL is set.
     detect_platform();
@@ -7320,6 +7330,11 @@ bool CLI::setup(int argc, char **argv)
     set_local_dir((path_resources / "i18n").string());
     set_sys_shapes_dir((path_resources / "shapes").string());
     set_custom_gcodes_dir((path_resources / "custom_gcodes").string());
+}
+
+bool CLI::setup(int argc, char **argv)
+{
+    setup_directories();
 
     // Parse all command line options into a DynamicConfig.
     // If any option is unsupported, print usage and abort immediately.
@@ -7360,6 +7375,130 @@ bool CLI::setup(int argc, char **argv)
         return false;
     }
 
+    return true;
+}
+
+// Defined below; script mode needs it before the definition point.
+void attach_console_on_demand();
+
+// The data directory the GUI would use, resolved without wxWidgets: script mode
+// has no wxApp, and wxStandardPaths dereferences wxTheApp. Keep this in step with
+// GUI_App::on_init_inner(), which applies the same two rules.
+static boost::filesystem::path script_mode_data_dir()
+{
+    // A `data_dir` folder next to the application makes the installation portable.
+    boost::filesystem::path app_folder = boost::dll::program_location().parent_path();
+#ifdef __APPLE__
+    // The executable lives inside <app>.app/Contents/MacOS.
+    app_folder = app_folder.parent_path().parent_path().parent_path();
+#endif
+    const boost::filesystem::path portable = app_folder / "data_dir";
+    if (boost::filesystem::exists(portable))
+        return portable;
+
+#ifdef _WIN32
+    const char *appdata = std::getenv("APPDATA");
+    if (appdata != nullptr && *appdata != '\0')
+        return boost::filesystem::path(appdata) / SLIC3R_APP_KEY;
+#elif defined(__APPLE__)
+    const char *home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0')
+        return boost::filesystem::path(home) / "Library" / "Application Support" / SLIC3R_APP_KEY;
+#else
+    // Since 2.3 the Linux config dir follows ${XDG_CONFIG_HOME}.
+    const char *xdg_config_home = std::getenv("XDG_CONFIG_HOME");
+    if (xdg_config_home != nullptr && *xdg_config_home != '\0')
+        return boost::filesystem::path(xdg_config_home) / SLIC3R_APP_KEY;
+    const char *home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0')
+        return boost::filesystem::path(home) / ".config" / SLIC3R_APP_KEY;
+#endif
+    return {};
+}
+
+void CLI::print_script_help() const
+{
+    attach_console_on_demand();
+
+    boost::nowide::cout
+        << SLIC3R_APP_KEY << "-" << SoftFever_VERSION << " script mode:" << std::endl
+        << std::endl
+        << "Usage: orca-slicer --script <script.py> [ --file <model.3mf> ] [ -- SCRIPT ARGUMENTS ]" << std::endl
+        << std::endl
+        << "Runs one Python script inside OrcaSlicer without starting the GUI, then exits." << std::endl
+        << "The model path may also be given as a single positional argument instead of --file." << std::endl
+        << std::endl
+        << "OPTIONS:" << std::endl
+        << "  --script <path>   Python script to execute as __main__. Selects script mode." << std::endl
+        << "  --file <path>     Model to hand to the script as sys.argv[1]. Requires --script." << std::endl
+        << "                    The file is not parsed until the script calls project.read()." << std::endl
+        << "  --help            Print this help and exit." << std::endl
+        << "  --                End of application options. Everything after it is passed to" << std::endl
+        << "                    the script unchanged, even if it looks like an option." << std::endl
+        << std::endl
+        << "EXIT CODES:" << std::endl
+        << "  0    normal completion, this help, or SystemExit(None)" << std::endl
+        << "  1    uncaught Python exception" << std::endl
+        << "  2    invalid arguments; the script was not executed" << std::endl
+        << "  3    the bundled Python runtime could not be initialized" << std::endl
+        << "  4    I/O failure, or an uncaught OSError / ProjectReadError" << std::endl
+        << "  130  the script was interrupted" << std::endl
+        << "An explicit SystemExit(n) with 0 <= n <= 125 is returned unchanged." << std::endl;
+}
+
+bool CLI::run_script_mode(int argc, char **argv, int &exit_code)
+{
+    const ScriptCommandLine command_line = parse_script_command_line(argc, argv);
+    if (!command_line.script_mode)
+        return false;
+
+    // Everything below runs without wx: no event loop, no OpenGL, no printer
+    // discovery, and no automatically executed plugins.
+    if (command_line.help_requested) {
+        // --help before the delimiter never runs the script; after it, it is just
+        // another script argument and never reaches this branch.
+        this->print_script_help();
+        exit_code = SCRIPT_EXIT_OK;
+        return true;
+    }
+    if (!command_line.error.empty()) {
+        attach_console_on_demand();
+        boost::nowide::cerr << "OrcaSlicer: " << command_line.error << std::endl;
+        this->print_script_help();
+        exit_code = SCRIPT_EXIT_INVALID_ARGS;
+        return true;
+    }
+
+    attach_console_on_demand();
+    // stdout belongs to the script from here on, so native diagnostics move to
+    // stderr before anything else can log.
+    set_console_logging_to_stderr();
+    setup_directories();
+
+    // The bundled runtime is discovered next to the resources; the data dir also
+    // holds the shared Python package directory and the log the interpreter tees
+    // stderr into, so scripts see the same environment plugins do.
+    if (data_dir().empty()) {
+        const boost::filesystem::path user_data = script_mode_data_dir();
+        if (!user_data.empty()) {
+            boost::system::error_code ec;
+            boost::filesystem::create_directories(user_data, ec);
+            if (ec)
+                BOOST_LOG_TRIVIAL(warning) << "failed to create data directory " << user_data.string() << ": " << ec.message();
+            else
+                set_data_dir(user_data.string());
+        }
+    }
+    const std::string temp_path = per_user_temp_dir(wxFileName::GetTempDir().utf8_str().data(), per_user_temp_id());
+    boost::system::error_code temp_ec;
+    boost::filesystem::create_directories(temp_path, temp_ec);
+    set_temporary_dir(temp_path);
+
+    // Script mode has no --debug option of its own, so diagnostics stay at the
+    // error level. Pre-release builds raise that to info on their own.
+    set_logging_level(1);
+
+    exit_code = run_python_script(command_line);
     return true;
 }
 

@@ -22,6 +22,7 @@
 #include "GLModel.hpp"
 #include "3DBed.hpp"
 #include "MeshUtils.hpp"
+#include "PlateGrid.hpp"
 #include "libslic3r/ParameterUtils.hpp"
 
 class GLUquadric;
@@ -34,21 +35,6 @@ typedef class GLUquadric GLUquadricObject;
 #define PLATE_ALL_IDX       -2
 
 #define MAX_PLATE_COUNT     36
-
-inline int compute_colum_count(int count)
-{
-    float value = sqrt((float)count);
-    float round_value = round(value);
-    int cols;
-
-    if (value > round_value)
-        cols = round_value +1;
-    else
-        cols = round_value;
-
-    return cols;
-}
-
 
 extern const float WIPE_TOWER_DEFAULT_X_POS;
 extern const float WIPE_TOWER_DEFAULT_Y_POS;  // Max y
