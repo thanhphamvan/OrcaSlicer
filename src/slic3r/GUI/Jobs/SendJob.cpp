@@ -102,18 +102,20 @@ inline std::string get_transform_string(int bytes)
 }
 
 // Backlog experiment (backlogs/remote-bambu-printer-management.md): the send-to-printer
-// upload is diverted to a local HTTP queue service instead of the printer's storage.
-// The endpoint can be overridden with the ORCA_QUEUE_URL environment variable.
+// upload can be diverted to a local HTTP queue service instead of the printer's storage.
+// The diversion is OFF unless ORCA_QUEUE_URL is set to the queue endpoint - with it unset
+// SendJob/PrintJob keep the stock behavior (real upload + print), so a normal launch is
+// never affected. This is the experiment's opt-in switch.
 static std::string queue_endpoint_url()
 {
     if (const char *url = std::getenv("ORCA_QUEUE_URL"); url && *url)
         return url;
-    return "http://127.0.0.1:5001/api/v1/job";
+    return "";
 }
 
-static int send_to_http_queue(const PrintParams &params,
-                              std::function<void(int, int, std::string)> update_fn,
-                              std::function<bool()>                      cancel_fn)
+bool queue_capture_enabled() { return !queue_endpoint_url().empty(); }
+
+int send_to_http_queue(const PrintParams &params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn)
 {
     boost::system::error_code ec;
     boost::filesystem::path   file_path(params.filename);
@@ -136,6 +138,20 @@ static int send_to_http_queue(const PrintParams &params,
     submission["nozzles_info"]     = params.nozzles_info;
     submission["connection_type"]  = params.connection_type;
     submission["task_use_ams"]     = params.task_use_ams;
+    submission["nozzle_mapping"]   = params.nozzle_mapping;
+    submission["task_bed_type"]    = params.task_bed_type;
+    submission["print_type"]       = params.print_type;
+    submission["task_bed_leveling"]           = params.task_bed_leveling;
+    submission["task_flow_cali"]              = params.task_flow_cali;
+    submission["task_vibration_cali"]         = params.task_vibration_cali;
+    submission["task_layer_inspect"]          = params.task_layer_inspect;
+    submission["task_record_timelapse"]       = params.task_record_timelapse;
+    submission["task_timelapse_use_internal"] = params.task_timelapse_use_internal;
+    submission["task_ext_change_assist"]      = params.task_ext_change_assist;
+    submission["auto_bed_leveling"]           = params.auto_bed_leveling;
+    submission["auto_flow_cali"]              = params.auto_flow_cali;
+    submission["auto_offset_cali"]            = params.auto_offset_cali;
+    submission["extruder_cali_manual_mode"]   = params.extruder_cali_manual_mode;
     submission["size_bytes"]       = (uint64_t) boost::filesystem::file_size(file_path, ec);
 
     if (update_fn)
@@ -172,7 +188,7 @@ static int send_to_http_queue(const PrintParams &params,
 
 void SendJob::process(Ctl &ctl)
 {
-    PrintParams params;
+    PrintParams params{};
     std::string msg;
     int curr_percent = 10;
     NetworkAgent* agent = wxGetApp().getAgent();
@@ -381,7 +397,8 @@ void SendJob::process(Ctl &ctl)
             // try to send local with record
             BOOST_LOG_TRIVIAL(info) << "send_job: try to send gcode to printer";
             ctl.update_status(curr_percent, _u8L("Sending G-code file over LAN"));
-            result = send_to_http_queue(params, update_fn, cancel_fn);
+            result = queue_capture_enabled() ? send_to_http_queue(params, update_fn, cancel_fn)
+                                             : agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);
             if (result == BAMBU_NETWORK_ERR_FTP_UPLOAD_FAILED) {
                 params.comments = "upload_failed";
             } else {
@@ -405,7 +422,8 @@ void SendJob::process(Ctl &ctl)
                     if(this->has_sdcard) {
                         // means the sdcard is abnormal but can be used option is enabled
                          ctl.update_status(curr_percent, _u8L("Sending G-code file over LAN, but the Storage in the printer is abnormal and print-issues may be caused by this."));
-                         result = send_to_http_queue(params, update_fn, cancel_fn);
+                         result = queue_capture_enabled() ? send_to_http_queue(params, update_fn, cancel_fn)
+                                                          : agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);
                         break;
                     }
                     ctl.update_status(curr_percent, _u8L("The Storage in the printer is abnormal. Please replace it with a normal Storage before sending to printer."));
@@ -415,7 +433,8 @@ void SendJob::process(Ctl &ctl)
                     return;
                 case DevStorage::SdcardState::HAS_SDCARD_NORMAL:
                     ctl.update_status(curr_percent, _u8L("Sending G-code file over LAN"));
-                    result = send_to_http_queue(params, update_fn, cancel_fn);
+                    result = queue_capture_enabled() ? send_to_http_queue(params, update_fn, cancel_fn)
+                                                     : agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);
                     break;
                 default:
                     ctl.update_status(curr_percent, _u8L("Encountered an unknown error with the Storage status. Please try again."));

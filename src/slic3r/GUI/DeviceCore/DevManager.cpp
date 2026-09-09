@@ -78,7 +78,15 @@ namespace Slic3r
                 std::string access_code  = m.value("access_code", "");
                 if (machine.dev_id.empty() || machine.dev_ip.empty() || access_code.empty())
                     continue;
-                dm->insert_local_device(machine, "farm", "free", m.value("version", ""), access_code);
+                MachineObject* obj = dm->insert_local_device(machine, "farm", "free", m.value("version", ""), access_code);
+                if (obj && obj->printer_agent_id.empty()) {
+                    // The Device-tab list filters on the live printer-agent id; when this hook
+                    // runs before the printer agent has loaded, insert_local_device() stamps an
+                    // empty id and the machine never shows. These are Bambu LAN printers, so
+                    // claim them for the BBL agent explicitly and re-persist the record.
+                    obj->printer_agent_id = BBL_PRINTER_AGENT_ID;
+                    DeviceManager::update_local_machine(*obj);
+                }
                 BOOST_LOG_TRIVIAL(info) << "farm hook: provisioned dev_id=" << machine.dev_id;
             }
         } catch (...) {

@@ -10,12 +10,22 @@
 namespace fs = boost::filesystem;
 
 namespace Slic3r {
+
+struct PrintParams;
+
 namespace GUI {
 
 class Plater;
 
 typedef std::function<void(int status, int code, std::string msg)> OnUpdateStatusFn;
 typedef std::function<bool()>                       WasCancelledFn;
+
+// Backlog experiment (backlogs/remote-bambu-printer-management.md): POST the sliced file and
+// job options to the local HTTP queue instead of contacting the printer. Shared by SendJob
+// and PrintJob. The diversion is opt-in: enabled only when ORCA_QUEUE_URL is set, otherwise
+// both jobs keep their stock printer behavior.
+bool queue_capture_enabled();
+int  send_to_http_queue(const PrintParams &params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn);
 
 class SendJob : public Job
 {

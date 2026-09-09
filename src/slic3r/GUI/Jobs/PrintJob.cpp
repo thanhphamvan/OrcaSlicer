@@ -1,4 +1,5 @@
 #include "PrintJob.hpp"
+#include "SendJob.hpp"
 #include "libslic3r/MTUtils.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/PresetBundle.hpp"
@@ -609,7 +610,8 @@ void PrintJob::process(Ctl &ctl)
     } else {
         if (this->could_emmc_print) {
             ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
-            result = m_agent->start_local_print(params, update_fn, cancel_fn);
+            result = queue_capture_enabled() ? send_to_http_queue(params, update_fn, cancel_fn)
+                                             : m_agent->start_local_print(params, update_fn, cancel_fn);
         } else {
             switch(this->sdcard_state) {
                 case DevStorage::SdcardState::NO_SDCARD:
@@ -619,7 +621,8 @@ void PrintJob::process(Ctl &ctl)
                     if(this->has_sdcard) {
                         // means the storage is abnormal but can be used option is enabled
                         ctl.update_status(curr_percent, _u8L("Sending print job over LAN, but the Storage in the printer is abnormal and print-issues may be caused by this."));
-                        result = m_agent->start_local_print(params, update_fn, cancel_fn);
+                        result = queue_capture_enabled() ? send_to_http_queue(params, update_fn, cancel_fn)
+                                                         : m_agent->start_local_print(params, update_fn, cancel_fn);
                         break;
                     }
                     ctl.update_status(curr_percent, _u8L("The Storage in the printer is abnormal. Please replace it with a normal Storage before sending print job to printer."));
@@ -629,7 +632,8 @@ void PrintJob::process(Ctl &ctl)
                     return;
                 case DevStorage::SdcardState::HAS_SDCARD_NORMAL:
                     ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
-                    result = m_agent->start_local_print(params, update_fn, cancel_fn);
+                    result = queue_capture_enabled() ? send_to_http_queue(params, update_fn, cancel_fn)
+                                                     : m_agent->start_local_print(params, update_fn, cancel_fn);
                     break;
                 default:
                     ctl.update_status(curr_percent, _u8L("Encountered an unknown error with the Storage status. Please try again."));
